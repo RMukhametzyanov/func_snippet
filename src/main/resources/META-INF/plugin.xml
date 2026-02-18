@@ -1,0 +1,39 @@
+<idea-plugin icon="/icon/image.png">
+    <id>com.testviewer.folder-scanner</id>
+    <name>func snippet</name>
+    <version>2.0.0</version>
+    <vendor email="support@example.com" url="https://www.example.com">Folder Scanner</vendor>
+
+    <description><![CDATA[
+    Плагин для сканирования папки и отображения дерева файлов и директорий.
+    Укажите путь к папке в настройках, и плагин отобразит её содержимое в виде дерева.
+    ]]></description>
+
+    <change-notes><![CDATA[
+    Версия 2.0.0 - Полностью переработанный плагин для сканирования папок.
+    ]]></change-notes>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html for description -->
+    <idea-version since-build="241" until-build="300.*"/>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html
+         on how to target different products -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- ToolWindow для боковой панели -->
+        <toolWindow id="func snippet" 
+                    secondary="true" 
+                    anchor="right" 
+                    factoryClass="com.testviewer.FolderTreeToolWindowFactory"/>
+        
+        <!-- Настройки плагина -->
+        <applicationConfigurable 
+            parentId="tools" 
+            instance="com.testviewer.FolderScannerConfigurable"
+            id="com.testviewer.FolderScannerConfigurable"
+            displayName="func snippet"/>
+    </extensions>
+
+</idea-plugin>
+

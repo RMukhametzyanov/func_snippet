@@ -1,0 +1,26 @@
+{
+  "PROJECT_NAME": "СПЕКТР",
+  "TESTERS": [
+    "Mukhametzyanov.RI",
+    "Bagautdinova.AV",
+    "Lobanov.SI"
+  ],
+  "SKIP_REASON": [
+    "Автотесты",
+    "Нагрузочное тестирование",
+    "Test-first",
+    "Другое"
+  ],
+  "TEST_STATUS": [
+    "Draft",
+    "Design",
+    "Review",
+    "Done"
+  ],
+  "TEST_TYPE": [
+    "Manual",
+    "Hybrid",
+    "Automated"
+  ]
+}
+
