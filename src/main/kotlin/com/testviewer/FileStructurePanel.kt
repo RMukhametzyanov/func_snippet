@@ -700,18 +700,29 @@ class FileStructurePanel(private val project: Project) {
         val sourceFile = currentFile ?: return
         val functionName = functionNode.name
         
+        // Проверяем настройку использования префикса модуля
+        val settings = FolderScannerSettings.getInstance()
+        val useModulePrefix = settings.state.useModulePrefix
+        
+        // Получаем имя модуля (имя файла без расширения)
+        val moduleName = if (useModulePrefix) {
+            sourceFile.nameWithoutExtension
+        } else {
+            null
+        }
+        
         // Формируем путь для импорта
-        val importPath = calculateImportPath(sourceFile, targetFile)
+        val importPath = calculateImportPath(sourceFile, targetFile, useModulePrefix, moduleName)
         
         // Формируем вызов функции
-        val functionCall = buildFunctionCall(functionNode)
+        val functionCall = buildFunctionCall(functionNode, moduleName)
         
         WriteCommandAction.runWriteCommandAction(project) {
             val document = editor.document
             val originalCaretOffset = editor.caretModel.offset
             
             // Сначала добавляем импорт в верх файла
-            val importInsertedInfo = addImportIfNeededInternal(editor, importPath, functionName)
+            val importInsertedInfo = addImportIfNeededInternal(editor, importPath, functionName, useModulePrefix, moduleName)
             
             // Корректируем позицию курсора, если импорт был вставлен перед курсором
             // importInsertedInfo содержит (offset, length) - где был вставлен импорт и его длина
@@ -738,7 +749,7 @@ class FileStructurePanel(private val project: Project) {
         }
     }
     
-    private fun calculateImportPath(sourceFile: VirtualFile, targetFile: VirtualFile): String {
+    private fun calculateImportPath(sourceFile: VirtualFile, targetFile: VirtualFile, useModulePrefix: Boolean, moduleName: String?): String {
         val projectBaseDir = project.baseDir ?: return ""
         
         // Получаем относительные пути от корня проекта
@@ -756,6 +767,18 @@ class FileStructurePanel(private val project: Project) {
             return ""
         }
         
+        // Если включен режим префикса модуля, возвращаем путь к директории модуля
+        if (useModulePrefix && moduleName != null) {
+            // Получаем директорию модуля (путь без имени файла)
+            val moduleDir = sourceModule.substringBeforeLast('.', "")
+            // Если модуль в корне проекта, возвращаем пустую строку (будет импорт без from)
+            return if (moduleDir.isEmpty()) {
+                "" // Модуль в корне, импорт будет просто "import moduleName"
+            } else {
+                moduleDir // Возвращаем путь к директории для "from moduleDir import moduleName"
+            }
+        }
+        
         // Получаем директории файлов
         val sourceDir = sourceModule.substringBeforeLast('.', "")
         val targetDir = targetModule.substringBeforeLast('.', "")
@@ -770,23 +793,32 @@ class FileStructurePanel(private val project: Project) {
         }
     }
     
-    private fun buildFunctionCall(functionNode: StructureNode): String {
+    private fun buildFunctionCall(functionNode: StructureNode, moduleName: String?): String {
         val functionName = functionNode.name
         val parameters = functionNode.parameters
         
-        // Формируем список аргументов
+        // Формируем список аргументов, исключая параметр self
         val args = if (parameters.isNotEmpty()) {
-            parameters.joinToString(", ") { param ->
-                "${param.name}=YOUR_ARG"
-            }
+            parameters
+                .filter { it.name != "self" }  // Игнорируем параметр self
+                .joinToString(", ") { param ->
+                    "${param.name}=YOUR_ARG"
+                }
         } else {
             ""
         }
         
-        val functionCall = if (args.isNotEmpty()) {
-            "$functionName($args)"
+        // Если указан префикс модуля, добавляем его
+        val fullFunctionName = if (moduleName != null) {
+            "$moduleName.$functionName"
         } else {
-            "$functionName()"
+            functionName
+        }
+        
+        val functionCall = if (args.isNotEmpty()) {
+            "$fullFunctionName($args)"
+        } else {
+            "$fullFunctionName()"
         }
         
         // Анализируем return statements в коде функции
@@ -1287,7 +1319,13 @@ class FileStructurePanel(private val project: Project) {
         return count
     }
     
-    private fun addImportIfNeededInternal(editor: com.intellij.openapi.editor.Editor, importPath: String, functionName: String): Pair<Int, Int>? {
+    private fun addImportIfNeededInternal(
+        editor: com.intellij.openapi.editor.Editor, 
+        importPath: String, 
+        functionName: String,
+        useModulePrefix: Boolean,
+        moduleName: String?
+    ): Pair<Int, Int>? {
         if (importPath.isEmpty()) {
             return null // Не нужно добавлять импорт
         }
@@ -1295,83 +1333,184 @@ class FileStructurePanel(private val project: Project) {
         val document = editor.document
         val text = document.text
         
-        // Проверяем, есть ли уже такой импорт
-        val importStatement = "from $importPath import $functionName"
-        val fullImportRegex = Regex("from\\s+$importPath\\s+import\\s+$functionName(?:\\s*,\\s*|\\s*$)")
-        if (fullImportRegex.find(text) != null) {
-            return null // Импорт уже есть
-        }
-        
-        // Проверяем, есть ли уже импорт из этого модуля
-        val existingImportRegex = Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)")
-        val existingImportMatch = existingImportRegex.find(text)
-        
-        if (existingImportMatch != null) {
-            // Добавляем функцию к существующему импорту
-            val existingImport = existingImportMatch.value
-            val importsList = existingImportMatch.groupValues[1].trim()
-            
-            // Проверяем, не добавлена ли уже функция
-            val functionNameRegex = Regex("\\b$functionName\\b")
-            if (functionNameRegex.find(importsList) != null) {
-                return null // Функция уже в импорте
+        // Если включен режим префикса модуля, импортируем модуль, а не функцию
+        if (useModulePrefix && moduleName != null) {
+            // Формируем импорт модуля
+            val importStatement = if (importPath.isEmpty()) {
+                // Модуль в корне проекта
+                "import $moduleName"
+            } else {
+                // Модуль в поддиректории
+                "from $importPath import $moduleName"
+            }
+            // Проверяем, есть ли уже импорт модуля
+            val fullImportRegex = if (importPath.isEmpty()) {
+                Regex("^import\\s+$moduleName(?:\\s*,\\s*|\\s*$)", RegexOption.MULTILINE)
+            } else {
+                Regex("from\\s+$importPath\\s+import\\s+$moduleName(?:\\s*,\\s*|\\s*$)", RegexOption.MULTILINE)
+            }
+            if (fullImportRegex.find(text) != null) {
+                return null // Импорт уже есть
             }
             
-            // Формируем новый импорт
-            val newImportsList = if (importsList.contains(",")) {
-                "$importsList, $functionName"
+            // Проверяем, есть ли уже импорт из этого модуля/директории
+            val existingImportRegex = if (importPath.isEmpty()) {
+                Regex("^import\\s+([^\\n]+)", RegexOption.MULTILINE)
             } else {
-                "$importsList, $functionName"
+                Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)", RegexOption.MULTILINE)
+            }
+            val existingImportMatch = existingImportRegex.find(text)
+            
+            if (existingImportMatch != null) {
+                // Добавляем модуль к существующему импорту
+                val existingImport = existingImportMatch.value
+                val importsList = existingImportMatch.groupValues[1].trim()
+                
+                // Проверяем, не добавлен ли уже модуль
+                val moduleNameRegex = Regex("\\b$moduleName\\b")
+                if (moduleNameRegex.find(importsList) != null) {
+                    return null // Модуль уже в импорте
+                }
+                
+                // Формируем новый импорт
+                val newImportsList = if (importsList.contains(",")) {
+                    "$importsList, $moduleName"
+                } else {
+                    "$importsList, $moduleName"
+                }
+                
+                val newImport = if (importPath.isEmpty()) {
+                    "import $newImportsList"
+                } else {
+                    "from $importPath import $newImportsList"
+                }
+                val startOffset = existingImportMatch.range.first
+                val endOffset = existingImportMatch.range.last + 1
+                
+                document.replaceString(startOffset, endOffset, newImport)
+                // При замене существующего импорта позиция курсора не меняется
+                return null
             }
             
-            val newImport = "from $importPath import $newImportsList"
-            val startOffset = existingImportMatch.range.first
-            val endOffset = existingImportMatch.range.last + 1
+            // Находим место для вставки импорта (после всех существующих импортов)
+            val importSectionEnd = findImportSectionEnd(text)
             
-            document.replaceString(startOffset, endOffset, newImport)
-            // При замене существующего импорта позиция курсора не меняется
-            return null
-        }
-        
-        // Находим место для вставки импорта (после всех существующих импортов)
-        val importSectionEnd = findImportSectionEnd(text)
-        
-        // Если файл пустой, просто вставляем импорт
-        if (text.isEmpty()) {
-            val insertedText = importStatement + "\n"
-            document.insertString(0, insertedText)
-            return Pair(0, insertedText.length) // offset, length
-        }
-        
-        // Вставляем новый импорт
-        val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
-            "\n$importStatement"
-        } else {
-            importStatement
-        }
-        
-        // Проверяем, нужно ли добавлять перевод строки в конце
-        val needsNewline = if (importSectionEnd < text.length) {
-            text[importSectionEnd] != '\n'
-        } else {
-            // Если мы в конце файла, проверяем последний символ
-            text.isNotEmpty() && text[text.length - 1] != '\n'
-        }
-        
-        val finalInsertText = if (needsNewline) {
-            insertText + "\n"
-        } else {
-            if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
-                insertText
+            // Если файл пустой, просто вставляем импорт
+            if (text.isEmpty()) {
+                val insertedText = importStatement + "\n"
+                document.insertString(0, insertedText)
+                return Pair(0, insertedText.length) // offset, length
+            }
+            
+            // Вставляем новый импорт
+            val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
+                "\n$importStatement"
             } else {
+                importStatement
+            }
+            
+            // Проверяем, нужно ли добавлять перевод строки в конце
+            val needsNewline = if (importSectionEnd < text.length) {
+                text[importSectionEnd] != '\n'
+            } else {
+                // Если мы в конце файла, проверяем последний символ
+                text.isNotEmpty() && text[text.length - 1] != '\n'
+            }
+            
+            val finalInsertText = if (needsNewline) {
                 insertText + "\n"
+            } else {
+                if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
+                    insertText
+                } else {
+                    insertText + "\n"
+                }
             }
+            
+            document.insertString(importSectionEnd, finalInsertText)
+            
+            // Возвращаем (offset, length) - где был вставлен импорт и его длина
+            return Pair(importSectionEnd, finalInsertText.length)
+        } else {
+            // Старая логика: импорт функции
+            // Проверяем, есть ли уже такой импорт
+            val importStatement = "from $importPath import $functionName"
+            val fullImportRegex = Regex("from\\s+$importPath\\s+import\\s+$functionName(?:\\s*,\\s*|\\s*$)")
+            if (fullImportRegex.find(text) != null) {
+                return null // Импорт уже есть
+            }
+            
+            // Проверяем, есть ли уже импорт из этого модуля
+            val existingImportRegex = Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)")
+            val existingImportMatch = existingImportRegex.find(text)
+            
+            if (existingImportMatch != null) {
+                // Добавляем функцию к существующему импорту
+                val existingImport = existingImportMatch.value
+                val importsList = existingImportMatch.groupValues[1].trim()
+                
+                // Проверяем, не добавлена ли уже функция
+                val functionNameRegex = Regex("\\b$functionName\\b")
+                if (functionNameRegex.find(importsList) != null) {
+                    return null // Функция уже в импорте
+                }
+                
+                // Формируем новый импорт
+                val newImportsList = if (importsList.contains(",")) {
+                    "$importsList, $functionName"
+                } else {
+                    "$importsList, $functionName"
+                }
+                
+                val newImport = "from $importPath import $newImportsList"
+                val startOffset = existingImportMatch.range.first
+                val endOffset = existingImportMatch.range.last + 1
+                
+                document.replaceString(startOffset, endOffset, newImport)
+                // При замене существующего импорта позиция курсора не меняется
+                return null
+            }
+            
+            // Находим место для вставки импорта (после всех существующих импортов)
+            val importSectionEnd = findImportSectionEnd(text)
+            
+            // Если файл пустой, просто вставляем импорт
+            if (text.isEmpty()) {
+                val insertedText = importStatement + "\n"
+                document.insertString(0, insertedText)
+                return Pair(0, insertedText.length) // offset, length
+            }
+            
+            // Вставляем новый импорт
+            val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
+                "\n$importStatement"
+            } else {
+                importStatement
+            }
+            
+            // Проверяем, нужно ли добавлять перевод строки в конце
+            val needsNewline = if (importSectionEnd < text.length) {
+                text[importSectionEnd] != '\n'
+            } else {
+                // Если мы в конце файла, проверяем последний символ
+                text.isNotEmpty() && text[text.length - 1] != '\n'
+            }
+            
+            val finalInsertText = if (needsNewline) {
+                insertText + "\n"
+            } else {
+                if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
+                    insertText
+                } else {
+                    insertText + "\n"
+                }
+            }
+            
+            document.insertString(importSectionEnd, finalInsertText)
+            
+            // Возвращаем (offset, length) - где был вставлен импорт и его длина
+            return Pair(importSectionEnd, finalInsertText.length)
         }
-        
-        document.insertString(importSectionEnd, finalInsertText)
-        
-        // Возвращаем (offset, length) - где был вставлен импорт и его длина
-        return Pair(importSectionEnd, finalInsertText.length)
     }
     
     private fun findImportSectionEnd(text: String): Int {
