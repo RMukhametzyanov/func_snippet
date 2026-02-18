@@ -8,7 +8,7 @@ group = "com.testviewer"
 version = "2.0.0"
 
 // Настройка Java toolchain для автоматической загрузки нужной версии Java
-// Используем Java 17 для компиляции, так как Kotlin компилятор не поддерживает Java 25
+// Используем Java 17 для компиляции
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(17))

@@ -89,11 +89,40 @@
 
 ### Предварительные требования
 
-Убедитесь, что у вас установлен JDK 17 или выше:
+**Важно:** Проект требует **JDK 17** (не поддерживает Java 25 и выше).
+
+Убедитесь, что у вас установлен JDK 17:
 
 ```powershell
 java -version
 ```
+
+Должно отображаться: `openjdk version "17.x.x"` или `java version "17.x.x"`
+
+### Настройка Java 17
+
+#### Настройка JAVA_HOME
+
+Переменная окружения `JAVA_HOME` должна указывать на Java 17.
+
+**Через PowerShell (от администратора):**
+```powershell
+[System.Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot", "Machine")
+```
+
+**Примечание:** Замените путь на актуальный путь к вашей установке Java 17.
+
+После установки `JAVA_HOME` перезапустите терминал.
+
+#### Настройка в проекте
+
+Проект настроен через `gradle.properties`. Если путь к Java 17 отличается, обновите файл:
+
+```properties
+org.gradle.java.home=C\:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot
+```
+
+Подробнее о настройке окружения см. в [DEVELOPMENT.md](DEVELOPMENT.md#настройка-окружения-разработки).
 
 ### Сборка плагина
 
@@ -108,6 +137,16 @@ java -version
 ```powershell
 .\gradlew.bat clean buildPlugin
 ```
+
+### Проверка конфигурации
+
+Проверьте, что Gradle использует правильную версию Java:
+
+```powershell
+.\gradlew.bat --version
+```
+
+В строке **JVM** должно быть указано: `17.x.x`
 
 ## Структура проекта
 

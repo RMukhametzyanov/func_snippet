@@ -1,5 +1,101 @@
 # Руководство по разработке
 
+## Настройка окружения разработки
+
+### Требования
+
+- **JDK 17** (обязательно, проект не поддерживает Java 25)
+- **Gradle 8.5+** (загружается автоматически через wrapper)
+- **PyCharm 2024.1+** или IntelliJ IDEA (для разработки)
+
+### Настройка Java 17
+
+Проект настроен на использование **Java 17**. Важно убедиться, что в системе установлена именно эта версия.
+
+#### Проверка установленной версии Java
+
+```powershell
+java -version
+```
+
+Должно отображаться: `openjdk version "17.x.x"` или `java version "17.x.x"`
+
+#### Настройка JAVA_HOME
+
+**Важно:** Переменная окружения `JAVA_HOME` должна указывать на Java 17.
+
+##### Вариант 1: Через PowerShell (от администратора)
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot", "Machine")
+```
+
+**Примечание:** Замените путь на актуальный путь к вашей установке Java 17.
+
+##### Вариант 2: Через GUI
+
+1. Откройте "Переменные среды" (Win + R → `sysdm.cpl` → "Дополнительно" → "Переменные среды")
+2. В "Системные переменные" найдите `JAVA_HOME`
+3. Измените значение на путь к Java 17 (например: `C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot`)
+4. Перезапустите терминал/IDE
+
+#### Настройка в проекте
+
+Проект уже настроен на использование Java 17 через файл `gradle.properties`:
+
+```properties
+org.gradle.java.home=C\:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot
+```
+
+**Важно:** Если путь к Java 17 отличается, обновите этот файл.
+
+### Сборка плагина
+
+#### Локальная сборка
+
+```powershell
+.\gradlew.bat buildPlugin
+```
+
+Собранный плагин будет находиться в `build/distributions/json-test-viewer-2.0.0.zip`
+
+#### Очистка и пересборка
+
+```powershell
+.\gradlew.bat clean buildPlugin
+```
+
+#### Проверка версии Gradle и Java
+
+```powershell
+.\gradlew.bat --version
+```
+
+Должно отображаться:
+- **JVM**: `17.x.x (Eclipse Adoptium ...)` или `17.x.x (Oracle ...)`
+
+#### Известные проблемы при сборке
+
+**Ошибка:** `JAVA_HOME is set to an invalid directory: C:\Program Files\Java\jdk-25`
+
+**Решение:** 
+1. Убедитесь, что Java 25 удалена из системы
+2. Установите `JAVA_HOME` на Java 17 (см. раздел "Настройка JAVA_HOME")
+3. Проверьте путь в `gradle.properties`
+4. Перезапустите терминал
+
+**Ошибка:** `Could not find or load main class`
+
+**Решение:** Проверьте, что `org.gradle.java.home` в `gradle.properties` указывает на правильный путь к Java 17.
+
+### Запуск плагина в режиме отладки
+
+```powershell
+.\gradlew.bat runIde
+```
+
+Это откроет новое окно PyCharm с установленным плагином для тестирования.
+
 ## Архитектура плагина
 
 ### Основные компоненты
