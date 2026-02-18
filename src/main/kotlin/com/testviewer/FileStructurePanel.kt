@@ -447,6 +447,11 @@ class FileStructurePanel(private val project: Project) {
         ): java.awt.Component {
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
             
+            // Убираем серое выделение для выбранных элементов без фокуса
+            if (selected && !hasFocus) {
+                background = tree?.background ?: java.awt.Color.WHITE
+            }
+            
             val node = (value as? DefaultMutableTreeNode)?.userObject
             if (node is StructureNode) {
                 icon = when (node.type) {
@@ -717,19 +722,19 @@ class FileStructurePanel(private val project: Project) {
                 originalCaretOffset
             }
             
-            // Вставляем вызов функции в место курсора
-            val documentText = document.text
-            val textToInsert = if (adjustedCaretOffset == documentText.length || 
-                                   (adjustedCaretOffset < documentText.length && documentText[adjustedCaretOffset] == '\n')) {
-                "$functionCall\n"
-            } else {
-                "\n$functionCall\n"
-            }
+            // Находим конец строки, где находится курсор
+            val currentLineNumber = document.getLineNumber(adjustedCaretOffset)
+            val lineEndOffset = document.getLineEndOffset(currentLineNumber)
             
-            document.insertString(adjustedCaretOffset, textToInsert)
+            // Перемещаем курсор в конец строки
+            editor.caretModel.moveToOffset(lineEndOffset)
+            
+            // Вставляем перевод строки и вызов функции
+            val textToInsert = "\n$functionCall\n"
+            document.insertString(lineEndOffset, textToInsert)
             
             // Перемещаем курсор после вставленного кода (на новой строке)
-            editor.caretModel.moveToOffset(adjustedCaretOffset + textToInsert.length)
+            editor.caretModel.moveToOffset(lineEndOffset + textToInsert.length)
         }
     }
     

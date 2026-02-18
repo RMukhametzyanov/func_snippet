@@ -1,4 +1,4 @@
-<idea-plugin icon="/icon/image.png">
+<idea-plugin>
     <id>com.testviewer.folder-scanner</id>
     <name>func snippet</name>
     <version>2.0.0</version>

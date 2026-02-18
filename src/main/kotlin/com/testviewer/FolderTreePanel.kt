@@ -322,6 +322,11 @@ class FolderTreePanel(private val project: Project) {
         ): java.awt.Component {
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
             
+            // Убираем серое выделение для выбранных элементов без фокуса
+            if (selected && !hasFocus) {
+                background = tree?.background ?: java.awt.Color.WHITE
+            }
+            
             val node = (value as? DefaultMutableTreeNode)?.userObject
             when {
                 node is FileNode -> {
