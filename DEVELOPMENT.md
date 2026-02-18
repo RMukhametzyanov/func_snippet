@@ -12,6 +12,28 @@
 
 Проект настроен на использование **Java 17**. Важно убедиться, что в системе установлена именно эта версия.
 
+#### Локальная установка Java 17
+
+**Для локальной сборки плагина Java 17 установлена в:**
+```
+C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot
+```
+
+#### Быстрый старт для сборки
+
+Если `JAVA_HOME` не настроен или указывает на неправильную версию Java, установите его для текущей сессии PowerShell:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+```
+
+Проверьте, что Gradle использует правильную версию:
+```powershell
+.\gradlew.bat --version
+```
+
+Должно отображаться: **JVM**: `17.0.18 (Eclipse Adoptium 17.0.18+8)` или аналогичное.
+
 #### Проверка установленной версии Java
 
 ```powershell
@@ -20,7 +42,7 @@ java -version
 
 Должно отображаться: `openjdk version "17.x.x"` или `java version "17.x.x"`
 
-#### Настройка JAVA_HOME
+#### Настройка JAVA_HOME (постоянная)
 
 **Важно:** Переменная окружения `JAVA_HOME` должна указывать на Java 17.
 
@@ -30,7 +52,7 @@ java -version
 [System.Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot", "Machine")
 ```
 
-**Примечание:** Замените путь на актуальный путь к вашей установке Java 17.
+**Примечание:** После установки перезапустите терминал/IDE.
 
 ##### Вариант 2: Через GUI
 
@@ -46,6 +68,11 @@ java -version
 **Важно:** Убедитесь, что `JAVA_HOME` настроен правильно (см. раздел выше). Gradle автоматически использует Java из `JAVA_HOME`.
 
 ### Сборка плагина
+
+**Перед сборкой:** Убедитесь, что `JAVA_HOME` указывает на Java 17. Если нет, установите для текущей сессии:
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+```
 
 #### Локальная сборка
 
@@ -74,11 +101,17 @@ java -version
 
 **Ошибка:** `JAVA_HOME is set to an invalid directory: C:\Program Files\Java\jdk-25`
 
-**Решение:** 
-1. Убедитесь, что Java 25 удалена из системы
+**Быстрое решение (для текущей сессии):**
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+.\gradlew.bat buildPlugin
+```
+
+**Постоянное решение:** 
+1. Убедитесь, что Java 25 удалена из системы или не используется
 2. Установите `JAVA_HOME` на Java 17 (см. раздел "Настройка JAVA_HOME")
-3. Проверьте путь в `gradle.properties`
-4. Перезапустите терминал
+3. Проверьте путь в `gradle.properties` (должен быть закомментирован)
+4. Перезапустите терминал/IDE
 
 **Ошибка:** `Could not find or load main class`
 

@@ -47,6 +47,8 @@ class FolderTreePanel(private val project: Project) {
             if (userObject is FileNode) {
                 val file = userObject.file
                 if (file.exists() && file.isFile) {
+                    // Передаем текущий текст поиска перед показом структуры
+                    fileStructurePanel.setSearchText(searchText)
                     fileStructurePanel.showFileStructure(file)
                 } else {
                     fileStructurePanel.showEmptyState()
@@ -200,6 +202,8 @@ class FolderTreePanel(private val project: Project) {
     private fun onSearchTextChanged() {
         searchText = searchTextField.text.trim()
         refreshTree()
+        // Обновляем фильтрацию функций в панели структуры
+        fileStructurePanel.setSearchText(searchText)
     }
     
     private fun buildTree(file: File): DefaultMutableTreeNode {
@@ -320,11 +324,22 @@ class FolderTreePanel(private val project: Project) {
             row: Int,
             hasFocus: Boolean
         ): java.awt.Component {
+            // Вызываем родительский метод с правильными параметрами выделения
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
             
-            // Убираем серое выделение для выбранных элементов без фокуса
-            if (selected && !hasFocus) {
-                background = tree?.background ?: java.awt.Color.WHITE
+            // Убираем серый фон для невыбранных элементов
+            // Для выбранных элементов оставляем стандартное синее выделение
+            if (!selected) {
+                // Для невыбранных элементов убираем фон полностью (прозрачный/черный)
+                background = null
+                isOpaque = false
+                // Используем правильный цвет текста из дерева
+                foreground = tree?.foreground
+            } else {
+                // Для выбранных элементов оставляем стандартное синее выделение
+                // Родительский метод уже установил правильный фон для выделения
+                isOpaque = true
+                // Цвет текста для выбранных элементов уже установлен родительским методом
             }
             
             val node = (value as? DefaultMutableTreeNode)?.userObject

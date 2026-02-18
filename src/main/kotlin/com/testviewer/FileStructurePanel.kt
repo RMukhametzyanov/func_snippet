@@ -30,6 +30,7 @@ class FileStructurePanel(private val project: Project) {
     private val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
     private var currentFileContent: String = ""
     private var currentFile: VirtualFile? = null
+    private var searchText: String = ""
     
     init {
         setupPanel()
@@ -180,6 +181,14 @@ class FileStructurePanel(private val project: Project) {
         }
     }
     
+    fun setSearchText(text: String) {
+        searchText = text.trim()
+        // Если файл уже открыт, обновляем структуру с учетом нового текста поиска
+        if (currentFile != null) {
+            showPythonStructure(currentFile!!)
+        }
+    }
+    
     private fun showPythonStructure(virtualFile: VirtualFile) {
         // Сохраняем содержимое файла для извлечения кода функций
         try {
@@ -254,14 +263,20 @@ class FileStructurePanel(private val project: Project) {
                     // Формируем сигнатуру
                     val signature = buildSignature(functionName, parameters, enrichedReturnType)
                     
+                    // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
+                    val endLine = findFunctionEnd(lines, i, currentIndent)
+                    
+                    // Проверяем, соответствует ли функция тексту поиска
+                    if (searchText.isNotBlank() && !functionMatchesSearch(functionName, signature, docstring, parameters, enrichedReturnType, lines, i, endLine)) {
+                        i++
+                        continue
+                    }
+                    
                     val nodeType = if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
                         StructureNodeType.METHOD
                     } else {
                         StructureNodeType.FUNCTION
                     }
-                    
-                    // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
-                    val endLine = findFunctionEnd(lines, i, currentIndent)
                     
                     val node = DefaultMutableTreeNode(
                         StructureNode(
@@ -289,8 +304,18 @@ class FileStructurePanel(private val project: Project) {
                 i++
             }
             
+            // Если есть текст поиска, удаляем классы без подходящих методов
+            if (searchText.isNotBlank()) {
+                removeEmptyClasses(rootNode)
+            }
+            
             if (rootNode.childCount == 0) {
-                rootNode.add(DefaultMutableTreeNode(StructureNode("Нет элементов", StructureNodeType.UNKNOWN)))
+                val message = if (searchText.isNotBlank()) {
+                    "Совпадений не найдено"
+                } else {
+                    "Нет элементов"
+                }
+                rootNode.add(DefaultMutableTreeNode(StructureNode(message, StructureNodeType.UNKNOWN)))
             }
             
             structureTree.model = DefaultTreeModel(rootNode)
@@ -299,6 +324,86 @@ class FileStructurePanel(private val project: Project) {
         } catch (e: Exception) {
             showEmptyState("Ошибка при парсинге файла: ${e.message}")
         }
+    }
+    
+    private fun functionMatchesSearch(
+        functionName: String,
+        signature: String,
+        docstring: String?,
+        parameters: List<ParameterInfo>,
+        returnType: String?,
+        lines: List<String>,
+        startLine: Int,
+        endLine: Int?
+    ): Boolean {
+        if (searchText.isBlank()) {
+            return true
+        }
+        
+        val searchLower = searchText.lowercase()
+        
+        // Проверяем имя функции
+        if (functionName.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем сигнатуру
+        if (signature.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем docstring
+        if (docstring != null && docstring.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем параметры
+        if (parameters.any { param ->
+            param.name.lowercase().contains(searchLower) ||
+            (param.type?.lowercase()?.contains(searchLower) == true) ||
+            (param.description?.lowercase()?.contains(searchLower) == true)
+        }) {
+            return true
+        }
+        
+        // Проверяем тип возврата
+        if (returnType != null && returnType.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем код функции
+        val actualEndLine = endLine ?: (lines.size - 1)
+        if (startLine < lines.size && actualEndLine < lines.size) {
+            val functionCode = lines.subList(startLine, minOf(actualEndLine + 1, lines.size))
+                .joinToString("\n")
+            if (functionCode.lowercase().contains(searchLower)) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    private fun removeEmptyClasses(node: DefaultMutableTreeNode) {
+        val nodesToRemove = mutableListOf<DefaultMutableTreeNode>()
+        
+        for (i in 0 until node.childCount) {
+            val child = node.getChildAt(i) as? DefaultMutableTreeNode ?: continue
+            val userObject = child.userObject
+            
+            if (userObject is StructureNode && userObject.type == StructureNodeType.CLASS) {
+                // Рекурсивно удаляем пустые классы внутри
+                removeEmptyClasses(child)
+                
+                // Если класс не имеет детей (методов), удаляем его
+                if (child.childCount == 0) {
+                    nodesToRemove.add(child)
+                }
+            }
+        }
+        
+        // Удаляем пустые классы
+        nodesToRemove.forEach { node.remove(it) }
     }
     
     private fun parseParameters(paramsStr: String): List<ParameterInfo> {
@@ -447,9 +552,19 @@ class FileStructurePanel(private val project: Project) {
         ): java.awt.Component {
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
             
-            // Убираем серое выделение для выбранных элементов без фокуса
-            if (selected && !hasFocus) {
-                background = tree?.background ?: java.awt.Color.WHITE
+            // Убираем серый фон для невыбранных элементов
+            // Для выбранных элементов оставляем стандартное синее выделение
+            if (!selected) {
+                // Для невыбранных элементов убираем фон полностью (прозрачный/черный)
+                background = null
+                isOpaque = false
+                // Используем правильный цвет текста из дерева
+                foreground = tree?.foreground
+            } else {
+                // Для выбранных элементов оставляем стандартное синее выделение
+                // Родительский метод уже установил правильный фон для выделения
+                isOpaque = true
+                // Цвет текста для выбранных элементов уже установлен родительским методом
             }
             
             val node = (value as? DefaultMutableTreeNode)?.userObject
