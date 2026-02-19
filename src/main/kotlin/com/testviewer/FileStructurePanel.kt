@@ -253,65 +253,72 @@ class FileStructurePanel(private val project: Project) {
                 }
                 
                 // Функция/метод
-                // Исправляем регулярное выражение для правильного захвата типа возврата
-                // Ищем весь тип возврата до двоеточия в конце строки
-                val functionMatch = Regex("^def\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(->\\s*(.+?))?\\s*:").find(trimmed)
-                if (functionMatch != null) {
-                    val functionName = functionMatch.groupValues[1]
-                    val paramsStr = functionMatch.groupValues.getOrNull(2) ?: ""
-                    val returnType = functionMatch.groupValues.getOrNull(4)?.trim()?.takeIf { it.isNotEmpty() }
+                // Поддерживаем как однострочные, так и многострочные определения функций
+                val functionDefMatch = Regex("^def\\s+(\\w+)\\s*\\(").find(trimmed)
+                if (functionDefMatch != null) {
+                    val functionName = functionDefMatch.groupValues[1]
                     
-                    // Парсим параметры
-                    var parameters = parseParameters(paramsStr)
-                    
-                    // Извлекаем docstring
-                    val docstring = extractDocstring(lines, i + 1)
-                    
-                    // Парсим docstring для извлечения описаний параметров и возвращаемого значения
-                    var enrichedReturnType = returnType
-                    if (docstring != null) {
-                        parameters = enrichParametersFromDocstring(parameters, docstring)
-                        enrichedReturnType = extractReturnTypeFromDocstring(docstring) ?: returnType
-                    }
-                    
-                    // Формируем сигнатуру
-                    val signature = buildSignature(functionName, parameters, enrichedReturnType)
-                    
-                    // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
-                    val endLine = findFunctionEnd(lines, i, currentIndent)
-                    
-                    // Проверяем, соответствует ли функция тексту поиска
-                    if (searchText.isNotBlank() && !functionMatchesSearch(functionName, signature, docstring, parameters, enrichedReturnType, lines, i, endLine)) {
-                        i++
-                        continue
-                    }
-                    
-                    val nodeType = if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
-                        StructureNodeType.METHOD
-                    } else {
-                        StructureNodeType.FUNCTION
-                    }
-                    
-                    val node = DefaultMutableTreeNode(
-                        StructureNode(
-                            name = functionName,
-                            type = nodeType,
-                            signature = signature,
-                            docstring = docstring,
-                            parameters = parameters,
-                            returnType = enrichedReturnType,
-                            startLine = i,
-                            endLine = endLine
+                    // Извлекаем полное определение функции (может быть многострочным)
+                    val functionDefResult = extractMultilineFunctionDefinition(lines, i)
+                    if (functionDefResult != null) {
+                        val (paramsStr, returnType, functionEndLine) = functionDefResult
+                        
+                        // Парсим параметры
+                        var parameters = parseParameters(paramsStr)
+                        
+                        // Извлекаем docstring (начинается после строки с двоеточием)
+                        val docstring = extractDocstring(lines, functionEndLine + 1)
+                        
+                        // Парсим docstring для извлечения описаний параметров и возвращаемого значения
+                        var enrichedReturnType = returnType
+                        if (docstring != null) {
+                            parameters = enrichParametersFromDocstring(parameters, docstring)
+                            enrichedReturnType = extractReturnTypeFromDocstring(docstring) ?: returnType
+                        }
+                        
+                        // Формируем сигнатуру
+                        val signature = buildSignature(functionName, parameters, enrichedReturnType)
+                        
+                        // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
+                        val endLine = findFunctionEnd(lines, functionEndLine, currentIndent)
+                        
+                        // Проверяем, соответствует ли функция тексту поиска
+                        if (searchText.isNotBlank() && !functionMatchesSearch(functionName, signature, docstring, parameters, enrichedReturnType, lines, i, endLine)) {
+                            i = functionEndLine + 1
+                            continue
+                        }
+                        
+                        val nodeType = if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
+                            StructureNodeType.METHOD
+                        } else {
+                            StructureNodeType.FUNCTION
+                        }
+                        
+                        val node = DefaultMutableTreeNode(
+                            StructureNode(
+                                name = functionName,
+                                type = nodeType,
+                                signature = signature,
+                                docstring = docstring,
+                                parameters = parameters,
+                                returnType = enrichedReturnType,
+                                startLine = i,
+                                endLine = endLine
+                            )
                         )
-                    )
-                    
-                    classStack.removeAll { it.second >= currentIndent }
-                    
-                    if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
-                        classStack.last().first.add(node)
-                    } else {
-                        rootNode.add(node)
-                        classStack.clear()
+                        
+                        classStack.removeAll { it.second >= currentIndent }
+                        
+                        if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
+                            classStack.last().first.add(node)
+                        } else {
+                            rootNode.add(node)
+                            classStack.clear()
+                        }
+                        
+                        // Переходим к следующей строке после определения функции
+                        i = functionEndLine + 1
+                        continue
                     }
                 }
                 
@@ -418,6 +425,283 @@ class FileStructurePanel(private val project: Project) {
         
         // Удаляем пустые классы
         nodesToRemove.forEach { node.remove(it) }
+    }
+    
+    /**
+     * Извлекает полное определение функции, включая многострочные параметры.
+     * Возвращает тройку: (paramsStr, returnType, endLine) или null, если определение некорректно.
+     */
+    private fun extractMultilineFunctionDefinition(lines: List<String>, startLine: Int): Triple<String, String?, Int>? {
+        if (startLine >= lines.size) return null
+        
+        val firstLine = lines[startLine]
+        val trimmed = firstLine.trim()
+        
+        // Проверяем, что это начало определения функции
+        if (!trimmed.startsWith("def ")) return null
+        
+        // Ищем открывающую скобку
+        val openParenIndex = trimmed.indexOf('(')
+        if (openParenIndex < 0) return null
+        
+        // Собираем строки до закрывающей скобки
+        val functionLines = mutableListOf<String>()
+        var currentLine = startLine
+        var parenDepth = 0
+        var foundOpenParen = false
+        var foundCloseParen = false
+        
+        while (currentLine < lines.size) {
+            val line = lines[currentLine]
+            val lineTrimmed = line.trim()
+            
+            // Пропускаем комментарии
+            if (lineTrimmed.startsWith("#")) {
+                currentLine++
+                continue
+            }
+            
+            // Подсчитываем скобки, учитывая строки
+            var inString = false
+            var stringChar: Char? = null
+            var escaped = false
+            
+            for (char in line) {
+                if (escaped) {
+                    escaped = false
+                    continue
+                }
+                
+                when (char) {
+                    '\\' -> escaped = true
+                    '"', '\'' -> {
+                        if (!inString) {
+                            inString = true
+                            stringChar = char
+                        } else if (char == stringChar) {
+                            inString = false
+                            stringChar = null
+                        }
+                    }
+                    '(' -> {
+                        if (!inString) {
+                            parenDepth++
+                            foundOpenParen = true
+                        }
+                    }
+                    ')' -> {
+                        if (!inString) {
+                            parenDepth--
+                            if (parenDepth == 0 && foundOpenParen) {
+                                foundCloseParen = true
+                            }
+                        }
+                    }
+                }
+            }
+            
+            functionLines.add(line)
+            
+            // Если нашли закрывающую скобку на верхнем уровне, ищем аннотацию возврата и двоеточие
+            if (foundCloseParen) {
+                // Ищем -> type : на текущей или следующих строках
+                var searchLine = currentLine
+                var returnType: String? = null
+                var colonFound = false
+                
+                // Проверяем текущую строку после закрывающей скобки
+                val afterCloseParen = line.substringAfter(')', "")
+                val afterCloseTrimmed = afterCloseParen.trim()
+                
+                // Ищем -> type : или -> type:
+                val returnTypeMatch = Regex("->\\s*([^:]+?)\\s*:").find(afterCloseTrimmed)
+                if (returnTypeMatch != null) {
+                    returnType = returnTypeMatch.groupValues[1].trim().takeIf { it.isNotEmpty() }
+                    colonFound = true
+                } else {
+                    // Проверяем, есть ли просто двоеточие без аннотации возврата
+                    if (afterCloseTrimmed.startsWith(':')) {
+                        colonFound = true
+                    }
+                }
+                
+                // Если двоеточие не найдено, ищем на следующих строках
+                if (!colonFound) {
+                    searchLine++
+                    while (searchLine < lines.size && !colonFound) {
+                        val nextLine = lines[searchLine].trim()
+                        if (nextLine.isEmpty() || nextLine.startsWith("#")) {
+                            searchLine++
+                            continue
+                        }
+                        
+                        // Ищем -> type : или просто :
+                        val returnTypeMatch2 = Regex("->\\s*([^:]+?)\\s*:").find(nextLine)
+                        if (returnTypeMatch2 != null) {
+                            returnType = returnTypeMatch2.groupValues[1].trim().takeIf { it.isNotEmpty() }
+                            colonFound = true
+                            functionLines.add(lines[searchLine])
+                            currentLine = searchLine
+                        } else if (nextLine.startsWith(':')) {
+                            colonFound = true
+                            functionLines.add(lines[searchLine])
+                            currentLine = searchLine
+                        }
+                        
+                        if (!colonFound) {
+                            searchLine++
+                        }
+                    }
+                }
+                
+                if (colonFound) {
+                    // Извлекаем параметры из собранных строк
+                    val paramsStr = extractParametersFromFunctionLines(functionLines)
+                    return Triple(paramsStr, returnType, currentLine)
+                } else {
+                    // Если не нашли двоеточие, определение некорректно
+                    return null
+                }
+            }
+            
+            currentLine++
+            
+            // Защита от бесконечного цикла
+            if (currentLine - startLine > 100) {
+                return null
+            }
+        }
+        
+        // Если не нашли закрывающую скобку, определение некорректно
+        return null
+    }
+    
+    /**
+     * Извлекает строку параметров из многострочного определения функции.
+     */
+    private fun extractParametersFromFunctionLines(functionLines: List<String>): String {
+        if (functionLines.isEmpty()) return ""
+        
+        val paramsBuilder = StringBuilder()
+        var foundOpenParen = false
+        var parenDepth = 0
+        var inString = false
+        var stringChar: Char? = null
+        var escaped = false
+        
+        for (line in functionLines) {
+            val trimmed = line.trim()
+            
+            // Пропускаем строку с def, но начинаем отслеживать скобки
+            if (trimmed.startsWith("def ")) {
+                val openParenIndex = trimmed.indexOf('(')
+                if (openParenIndex >= 0) {
+                    foundOpenParen = true
+                    val afterDef = trimmed.substring(openParenIndex + 1)
+                    
+                    // Подсчитываем скобки в первой строке
+                    for (char in afterDef) {
+                        if (escaped) {
+                            escaped = false
+                            paramsBuilder.append(char)
+                            continue
+                        }
+                        
+                        when (char) {
+                            '\\' -> escaped = true
+                            '"', '\'' -> {
+                                if (!inString) {
+                                    inString = true
+                                    stringChar = char
+                                } else if (char == stringChar) {
+                                    inString = false
+                                    stringChar = null
+                                }
+                                paramsBuilder.append(char)
+                            }
+                            '(' -> {
+                                if (!inString) parenDepth++
+                                paramsBuilder.append(char)
+                            }
+                            ')' -> {
+                                if (!inString) {
+                                    parenDepth--
+                                    if (parenDepth == 0) {
+                                        // Нашли закрывающую скобку верхнего уровня
+                                        break
+                                    }
+                                }
+                                paramsBuilder.append(char)
+                            }
+                            else -> paramsBuilder.append(char)
+                        }
+                    }
+                    
+                    if (parenDepth > 0) {
+                        paramsBuilder.append(" ")
+                    }
+                }
+                continue
+            }
+            
+            if (foundOpenParen && parenDepth > 0) {
+                // Добавляем строку с параметрами, отслеживая скобки
+                for (char in trimmed) {
+                    if (escaped) {
+                        escaped = false
+                        paramsBuilder.append(char)
+                        continue
+                    }
+                    
+                    when (char) {
+                        '\\' -> escaped = true
+                        '"', '\'' -> {
+                            if (!inString) {
+                                inString = true
+                                stringChar = char
+                            } else if (char == stringChar) {
+                                inString = false
+                                stringChar = null
+                            }
+                            paramsBuilder.append(char)
+                        }
+                        '(' -> {
+                            if (!inString) parenDepth++
+                            paramsBuilder.append(char)
+                        }
+                        ')' -> {
+                            if (!inString) {
+                                parenDepth--
+                                if (parenDepth == 0) {
+                                    // Нашли закрывающую скобку верхнего уровня
+                                    break
+                                }
+                            }
+                            paramsBuilder.append(char)
+                        }
+                        else -> paramsBuilder.append(char)
+                    }
+                }
+                
+                if (parenDepth > 0) {
+                    paramsBuilder.append(" ")
+                } else {
+                    // Закрывающая скобка найдена, останавливаемся
+                    break
+                }
+            }
+        }
+        
+        // Извлекаем только содержимое между скобками
+        val fullText = paramsBuilder.toString()
+        val openParenIndex = fullText.indexOf('(')
+        val closeParenIndex = fullText.lastIndexOf(')')
+        
+        if (openParenIndex >= 0 && closeParenIndex > openParenIndex) {
+            return fullText.substring(openParenIndex + 1, closeParenIndex).trim()
+        }
+        
+        return ""
     }
     
     private fun parseParameters(paramsStr: String): List<ParameterInfo> {
