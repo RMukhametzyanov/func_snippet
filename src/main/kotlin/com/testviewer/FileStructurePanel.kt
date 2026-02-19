@@ -31,6 +31,7 @@ class FileStructurePanel(private val project: Project) {
     private var currentFileContent: String = ""
     private var currentFile: VirtualFile? = null
     private var searchText: String = ""
+    private val addButton = JButton("+")
     
     init {
         setupPanel()
@@ -53,13 +54,26 @@ class FileStructurePanel(private val project: Project) {
         scrollPane.setViewportView(structureTree)
         scrollPane.border = EmptyBorder(5, 5, 5, 5)
         
+        // Настройка кнопки "+" внизу списка функций
+        addButton.toolTipText = "Сгенерировать Python функцию из fetch запроса"
+        addButton.border = EmptyBorder(5, 5, 5, 5)
+        addButton.isContentAreaFilled = false
+        addButton.addActionListener {
+            FetchToPythonDialog(project, currentFile).show()
+        }
+        
+        // Обертка для scrollPane с кнопкой внизу
+        val treePanel = JPanel(BorderLayout())
+        treePanel.add(scrollPane, BorderLayout.CENTER)
+        treePanel.add(addButton, BorderLayout.SOUTH)
+        
         // Настройка области кода с редактором IntelliJ Platform
         setupCodeEditor()
         
         codeEditorPanel.border = EmptyBorder(5, 5, 5, 5)
         
         // Настройка split pane
-        splitPane.topComponent = scrollPane
+        splitPane.topComponent = treePanel
         splitPane.bottomComponent = codeEditorPanel
         splitPane.orientation = JSplitPane.VERTICAL_SPLIT
         splitPane.dividerLocation = 200

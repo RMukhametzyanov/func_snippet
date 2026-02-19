@@ -118,6 +118,14 @@ class FolderTreePanel(private val project: Project) {
         // Панель с кнопками
         val buttonsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0))
         
+        val refreshButton = JButton(AllIcons.Actions.Refresh)
+        refreshButton.toolTipText = "Обновить дерево"
+        refreshButton.border = EmptyBorder(2, 2, 2, 2)
+        refreshButton.isContentAreaFilled = false
+        refreshButton.addActionListener {
+            refreshTree()
+        }
+        
         val settingsButton = JButton(AllIcons.General.Settings)
         settingsButton.toolTipText = "Открыть настройки плагина"
         settingsButton.border = EmptyBorder(2, 2, 2, 2)
@@ -129,14 +137,6 @@ class FolderTreePanel(private val project: Project) {
                 null
             )
             // Обновляем дерево после закрытия настроек
-            refreshTree()
-        }
-        
-        val refreshButton = JButton(AllIcons.Actions.Refresh)
-        refreshButton.toolTipText = "Обновить дерево"
-        refreshButton.border = EmptyBorder(2, 2, 2, 2)
-        refreshButton.isContentAreaFilled = false
-        refreshButton.addActionListener {
             refreshTree()
         }
         
