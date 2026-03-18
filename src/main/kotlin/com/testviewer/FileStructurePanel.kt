@@ -598,6 +598,8 @@ class FileStructurePanel(private val project: Project) {
                 if (openParenIndex >= 0) {
                     foundOpenParen = true
                     val afterDef = trimmed.substring(openParenIndex + 1)
+                    // Уже внутри скобки def(...); иначе первая ')' даёт parenDepth < 0 и параметры не извлекаются
+                    parenDepth = 1
                     
                     // Подсчитываем скобки в первой строке
                     for (char in afterDef) {
@@ -692,16 +694,8 @@ class FileStructurePanel(private val project: Project) {
             }
         }
         
-        // Извлекаем только содержимое между скобками
-        val fullText = paramsBuilder.toString()
-        val openParenIndex = fullText.indexOf('(')
-        val closeParenIndex = fullText.lastIndexOf(')')
-        
-        if (openParenIndex >= 0 && closeParenIndex > openParenIndex) {
-            return fullText.substring(openParenIndex + 1, closeParenIndex).trim()
-        }
-        
-        return ""
+        // Содержимое списка параметров (без внешних скобок def); типы вроде Callable[(...)] не режем по первой '('
+        return paramsBuilder.toString().trim()
     }
     
     private fun parseParameters(paramsStr: String): List<ParameterInfo> {
@@ -1215,7 +1209,7 @@ class FileStructurePanel(private val project: Project) {
             parameters
                 .filter { it.name != "self" }  // Игнорируем параметр self
                 .joinToString(", ") { param ->
-                    "${param.name}=YOUR_ARG"
+                    "${param.name}=YOU_ARG"
                 }
         } else {
             ""
