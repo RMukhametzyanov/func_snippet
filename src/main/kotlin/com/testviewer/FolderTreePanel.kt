@@ -47,6 +47,8 @@ class FolderTreePanel(private val project: Project) {
             if (userObject is FileNode) {
                 val file = userObject.file
                 if (file.exists() && file.isFile) {
+                    // Передаем текущий текст поиска перед показом структуры
+                    fileStructurePanel.setSearchText(searchText)
                     fileStructurePanel.showFileStructure(file)
                 } else {
                     fileStructurePanel.showEmptyState()
@@ -116,6 +118,14 @@ class FolderTreePanel(private val project: Project) {
         // Панель с кнопками
         val buttonsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0))
         
+        val refreshButton = JButton(AllIcons.Actions.Refresh)
+        refreshButton.toolTipText = "Обновить дерево"
+        refreshButton.border = EmptyBorder(2, 2, 2, 2)
+        refreshButton.isContentAreaFilled = false
+        refreshButton.addActionListener {
+            refreshTree()
+        }
+        
         val settingsButton = JButton(AllIcons.General.Settings)
         settingsButton.toolTipText = "Открыть настройки плагина"
         settingsButton.border = EmptyBorder(2, 2, 2, 2)
@@ -127,14 +137,6 @@ class FolderTreePanel(private val project: Project) {
                 null
             )
             // Обновляем дерево после закрытия настроек
-            refreshTree()
-        }
-        
-        val refreshButton = JButton(AllIcons.Actions.Refresh)
-        refreshButton.toolTipText = "Обновить дерево"
-        refreshButton.border = EmptyBorder(2, 2, 2, 2)
-        refreshButton.isContentAreaFilled = false
-        refreshButton.addActionListener {
             refreshTree()
         }
         
@@ -200,6 +202,8 @@ class FolderTreePanel(private val project: Project) {
     private fun onSearchTextChanged() {
         searchText = searchTextField.text.trim()
         refreshTree()
+        // Обновляем фильтрацию функций в панели структуры
+        fileStructurePanel.setSearchText(searchText)
     }
     
     private fun buildTree(file: File): DefaultMutableTreeNode {
@@ -320,7 +324,23 @@ class FolderTreePanel(private val project: Project) {
             row: Int,
             hasFocus: Boolean
         ): java.awt.Component {
+            // Вызываем родительский метод с правильными параметрами выделения
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
+            
+            // Убираем серый фон для невыбранных элементов
+            // Для выбранных элементов оставляем стандартное синее выделение
+            if (!selected) {
+                // Для невыбранных элементов убираем фон полностью (прозрачный/черный)
+                background = null
+                isOpaque = false
+                // Используем правильный цвет текста из дерева
+                foreground = tree?.foreground
+            } else {
+                // Для выбранных элементов оставляем стандартное синее выделение
+                // Родительский метод уже установил правильный фон для выделения
+                isOpaque = true
+                // Цвет текста для выбранных элементов уже установлен родительским методом
+            }
             
             val node = (value as? DefaultMutableTreeNode)?.userObject
             when {

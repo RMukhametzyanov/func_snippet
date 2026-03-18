@@ -1,5 +1,130 @@
 # Руководство по разработке
 
+## Настройка окружения разработки
+
+### Требования
+
+- **JDK 17** (обязательно, проект не поддерживает Java 25)
+- **Gradle 8.5+** (загружается автоматически через wrapper)
+- **PyCharm 2024.1+** или IntelliJ IDEA (для разработки)
+
+### Настройка Java 17
+
+Проект настроен на использование **Java 17**. Важно убедиться, что в системе установлена именно эта версия.
+
+#### Локальная установка Java 17
+
+**Для локальной сборки плагина Java 17 установлена в:**
+```
+C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot
+```
+
+#### Быстрый старт для сборки
+
+Если `JAVA_HOME` не настроен или указывает на неправильную версию Java, установите его для текущей сессии PowerShell:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+```
+
+Проверьте, что Gradle использует правильную версию:
+```powershell
+.\gradlew.bat --version
+```
+
+Должно отображаться: **JVM**: `17.0.18 (Eclipse Adoptium 17.0.18+8)` или аналогичное.
+
+#### Проверка установленной версии Java
+
+```powershell
+java -version
+```
+
+Должно отображаться: `openjdk version "17.x.x"` или `java version "17.x.x"`
+
+#### Настройка JAVA_HOME (постоянная)
+
+**Важно:** Переменная окружения `JAVA_HOME` должна указывать на Java 17.
+
+##### Вариант 1: Через PowerShell (от администратора)
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot", "Machine")
+```
+
+**Примечание:** После установки перезапустите терминал/IDE.
+
+##### Вариант 2: Через GUI
+
+1. Откройте "Переменные среды" (Win + R → `sysdm.cpl` → "Дополнительно" → "Переменные среды")
+2. В "Системные переменные" найдите `JAVA_HOME`
+3. Измените значение на путь к Java 17 (например: `C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot`)
+4. Перезапустите терминал/IDE
+
+#### Настройка в проекте
+
+Проект использует `JAVA_HOME` из переменных окружения системы. Файл `gradle.properties` **не содержит** `org.gradle.java.home`, чтобы обеспечить совместимость с разными операционными системами (Windows для локальной разработки и Linux для CI/CD).
+
+**Важно:** Убедитесь, что `JAVA_HOME` настроен правильно (см. раздел выше). Gradle автоматически использует Java из `JAVA_HOME`.
+
+### Сборка плагина
+
+**Перед сборкой:** Убедитесь, что `JAVA_HOME` указывает на Java 17. Если нет, установите для текущей сессии:
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+```
+
+#### Локальная сборка
+
+```powershell
+.\gradlew.bat buildPlugin
+```
+
+Собранный плагин будет находиться в `build/distributions/json-test-viewer-2.0.0.zip`
+
+#### Очистка и пересборка
+
+```powershell
+.\gradlew.bat clean buildPlugin
+```
+
+#### Проверка версии Gradle и Java
+
+```powershell
+.\gradlew.bat --version
+```
+
+Должно отображаться:
+- **JVM**: `17.x.x (Eclipse Adoptium ...)` или `17.x.x (Oracle ...)`
+
+#### Известные проблемы при сборке
+
+**Ошибка:** `JAVA_HOME is set to an invalid directory: C:\Program Files\Java\jdk-25`
+
+**Быстрое решение (для текущей сессии):**
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+.\gradlew.bat buildPlugin
+```
+
+**Постоянное решение:** 
+1. Убедитесь, что Java 25 удалена из системы или не используется
+2. Установите `JAVA_HOME` на Java 17 (см. раздел "Настройка JAVA_HOME")
+3. Проверьте путь в `gradle.properties` (должен быть закомментирован)
+4. Перезапустите терминал/IDE
+
+**Ошибка:** `Could not find or load main class`
+
+**Решение:** Проверьте, что `org.gradle.java.home` в `gradle.properties` указывает на правильный путь к Java 17.
+
+### Запуск плагина в режиме отладки
+
+```powershell
+.\gradlew.bat runIde
+```
+
+Это откроет новое окно PyCharm с установленным плагином для тестирования.
+
 ## Архитектура плагина
 
 ### Основные компоненты

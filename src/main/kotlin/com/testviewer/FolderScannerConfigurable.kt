@@ -16,6 +16,7 @@ class FolderScannerConfigurable : Configurable {
     private var panel: JPanel? = null
     private val folderListModel = DefaultListModel<String>()
     private val folderList = JList(folderListModel)
+    private val useModulePrefixCheckbox = JCheckBox("Указывать префикс метода")
 
     override fun getDisplayName(): String = "func snippet"
 
@@ -37,6 +38,7 @@ class FolderScannerConfigurable : Configurable {
             .addComponent(infoLabel, 1)
             .addLabeledComponent(JBLabel("Папки для сканирования:"), scrollPane, 1, false)
             .addComponent(buttonsPanel, 1)
+            .addComponent(useModulePrefixCheckbox, 1)
             .addComponentFillVertically(JPanel(), 0)
             .panel
 
@@ -96,8 +98,10 @@ class FolderScannerConfigurable : Configurable {
         val settings = FolderScannerSettings.getInstance()
         val currentPaths = settings.state.folderPaths.toList()
         val uiPaths = (0 until folderListModel.size).map { folderListModel.getElementAt(it) }
+        val currentUseModulePrefix = settings.state.useModulePrefix
+        val uiUseModulePrefix = useModulePrefixCheckbox.isSelected
         
-        return currentPaths != uiPaths
+        return currentPaths != uiPaths || currentUseModulePrefix != uiUseModulePrefix
     }
 
     @Throws(ConfigurationException::class)
@@ -118,6 +122,7 @@ class FolderScannerConfigurable : Configurable {
         }
         
         settings.state.folderPaths = newPaths
+        settings.state.useModulePrefix = useModulePrefixCheckbox.isSelected
     }
 
     override fun reset() {
@@ -130,6 +135,7 @@ class FolderScannerConfigurable : Configurable {
         settings.state.folderPaths.forEach { path ->
             folderListModel.addElement(path)
         }
+        useModulePrefixCheckbox.isSelected = settings.state.useModulePrefix
     }
 }
 

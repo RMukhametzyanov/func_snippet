@@ -23,6 +23,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         
+    - name: Verify Java version
+      run: |
+        java -version
+        echo "JAVA_HOME=$JAVA_HOME"
+        
     - name: Cache Gradle packages
       uses: actions/cache@v4
       with:
@@ -36,8 +41,21 @@ jobs:
     - name: Make gradlew executable
       run: chmod +x ./gradlew
       
+    - name: Verify Gradle wrapper
+      run: ./gradlew --version
+      
     - name: Build plugin
-      run: ./gradlew buildPlugin
+      run: ./gradlew buildPlugin --no-daemon
+      
+    - name: Verify build output
+      run: |
+        if ls build/distributions/*.zip 1> /dev/null 2>&1; then
+          echo "Build successful! Plugin archive created:"
+          ls -lh build/distributions/*.zip
+        else
+          echo "Error: Plugin archive not found!"
+          exit 1
+        fi
       
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -45,4 +63,7 @@ jobs:
         name: plugin
         path: build/distributions/*.zip
         retention-days: 30
+        if-no-files-found: error
+
+
 

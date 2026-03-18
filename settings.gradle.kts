@@ -1,2 +1,2 @@
-rootProject.name = "json-test-viewer"
+rootProject.name = "func-snippet"
 

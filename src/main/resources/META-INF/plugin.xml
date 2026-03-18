@@ -1,16 +1,16 @@
-<idea-plugin icon="/icon/image.png">
+<idea-plugin>
     <id>com.testviewer.folder-scanner</id>
     <name>func snippet</name>
     <version>2.0.0</version>
     <vendor email="support@example.com" url="https://www.example.com">Folder Scanner</vendor>
 
     <description><![CDATA[
-    Плагин для сканирования папки и отображения дерева файлов и директорий.
-    Укажите путь к папке в настройках, и плагин отобразит её содержимое в виде дерева.
+    A PyCharm tool window that scans a selected folder and shows a navigable tree of files.
+    It also displays Python file structure (classes/functions) and can insert function calls into the editor.
     ]]></description>
 
     <change-notes><![CDATA[
-    Версия 2.0.0 - Полностью переработанный плагин для сканирования папок.
+    Version 2.0.0 - Major rewrite of the plugin UI and folder scanning workflow.
     ]]></change-notes>
 
     <!-- please see https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html for description -->

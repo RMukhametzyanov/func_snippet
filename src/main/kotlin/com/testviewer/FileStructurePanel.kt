@@ -30,6 +30,8 @@ class FileStructurePanel(private val project: Project) {
     private val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
     private var currentFileContent: String = ""
     private var currentFile: VirtualFile? = null
+    private var searchText: String = ""
+    private val addButton = JButton("+")
     
     init {
         setupPanel()
@@ -52,13 +54,26 @@ class FileStructurePanel(private val project: Project) {
         scrollPane.setViewportView(structureTree)
         scrollPane.border = EmptyBorder(5, 5, 5, 5)
         
+        // Настройка кнопки "+" внизу списка функций
+        addButton.toolTipText = "Сгенерировать Python функцию из fetch запроса"
+        addButton.border = EmptyBorder(5, 5, 5, 5)
+        addButton.isContentAreaFilled = false
+        addButton.addActionListener {
+            FetchToPythonDialog(project, currentFile).show()
+        }
+        
+        // Обертка для scrollPane с кнопкой внизу
+        val treePanel = JPanel(BorderLayout())
+        treePanel.add(scrollPane, BorderLayout.CENTER)
+        treePanel.add(addButton, BorderLayout.SOUTH)
+        
         // Настройка области кода с редактором IntelliJ Platform
         setupCodeEditor()
         
         codeEditorPanel.border = EmptyBorder(5, 5, 5, 5)
         
         // Настройка split pane
-        splitPane.topComponent = scrollPane
+        splitPane.topComponent = treePanel
         splitPane.bottomComponent = codeEditorPanel
         splitPane.orientation = JSplitPane.VERTICAL_SPLIT
         splitPane.dividerLocation = 200
@@ -180,6 +195,14 @@ class FileStructurePanel(private val project: Project) {
         }
     }
     
+    fun setSearchText(text: String) {
+        searchText = text.trim()
+        // Если файл уже открыт, обновляем структуру с учетом нового текста поиска
+        if (currentFile != null) {
+            showPythonStructure(currentFile!!)
+        }
+    }
+    
     private fun showPythonStructure(virtualFile: VirtualFile) {
         // Сохраняем содержимое файла для извлечения кода функций
         try {
@@ -230,67 +253,90 @@ class FileStructurePanel(private val project: Project) {
                 }
                 
                 // Функция/метод
-                // Исправляем регулярное выражение для правильного захвата типа возврата
-                // Ищем весь тип возврата до двоеточия в конце строки
-                val functionMatch = Regex("^def\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*(->\\s*(.+?))?\\s*:").find(trimmed)
-                if (functionMatch != null) {
-                    val functionName = functionMatch.groupValues[1]
-                    val paramsStr = functionMatch.groupValues.getOrNull(2) ?: ""
-                    val returnType = functionMatch.groupValues.getOrNull(4)?.trim()?.takeIf { it.isNotEmpty() }
+                // Поддерживаем как однострочные, так и многострочные определения функций
+                val functionDefMatch = Regex("^def\\s+(\\w+)\\s*\\(").find(trimmed)
+                if (functionDefMatch != null) {
+                    val functionName = functionDefMatch.groupValues[1]
                     
-                    // Парсим параметры
-                    var parameters = parseParameters(paramsStr)
-                    
-                    // Извлекаем docstring
-                    val docstring = extractDocstring(lines, i + 1)
-                    
-                    // Парсим docstring для извлечения описаний параметров и возвращаемого значения
-                    var enrichedReturnType = returnType
-                    if (docstring != null) {
-                        parameters = enrichParametersFromDocstring(parameters, docstring)
-                        enrichedReturnType = extractReturnTypeFromDocstring(docstring) ?: returnType
-                    }
-                    
-                    // Формируем сигнатуру
-                    val signature = buildSignature(functionName, parameters, enrichedReturnType)
-                    
-                    val nodeType = if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
-                        StructureNodeType.METHOD
-                    } else {
-                        StructureNodeType.FUNCTION
-                    }
-                    
-                    // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
-                    val endLine = findFunctionEnd(lines, i, currentIndent)
-                    
-                    val node = DefaultMutableTreeNode(
-                        StructureNode(
-                            name = functionName,
-                            type = nodeType,
-                            signature = signature,
-                            docstring = docstring,
-                            parameters = parameters,
-                            returnType = enrichedReturnType,
-                            startLine = i,
-                            endLine = endLine
+                    // Извлекаем полное определение функции (может быть многострочным)
+                    val functionDefResult = extractMultilineFunctionDefinition(lines, i)
+                    if (functionDefResult != null) {
+                        val (paramsStr, returnType, functionEndLine) = functionDefResult
+                        
+                        // Парсим параметры
+                        var parameters = parseParameters(paramsStr)
+                        
+                        // Извлекаем docstring (начинается после строки с двоеточием)
+                        val docstring = extractDocstring(lines, functionEndLine + 1)
+                        
+                        // Парсим docstring для извлечения описаний параметров и возвращаемого значения
+                        var enrichedReturnType = returnType
+                        if (docstring != null) {
+                            parameters = enrichParametersFromDocstring(parameters, docstring)
+                            enrichedReturnType = extractReturnTypeFromDocstring(docstring) ?: returnType
+                        }
+                        
+                        // Формируем сигнатуру
+                        val signature = buildSignature(functionName, parameters, enrichedReturnType)
+                        
+                        // Определяем конец функции (следующая функция/класс с таким же или меньшим отступом)
+                        val endLine = findFunctionEnd(lines, functionEndLine, currentIndent)
+                        
+                        // Проверяем, соответствует ли функция тексту поиска
+                        if (searchText.isNotBlank() && !functionMatchesSearch(functionName, signature, docstring, parameters, enrichedReturnType, lines, i, endLine)) {
+                            i = functionEndLine + 1
+                            continue
+                        }
+                        
+                        val nodeType = if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
+                            StructureNodeType.METHOD
+                        } else {
+                            StructureNodeType.FUNCTION
+                        }
+                        
+                        val node = DefaultMutableTreeNode(
+                            StructureNode(
+                                name = functionName,
+                                type = nodeType,
+                                signature = signature,
+                                docstring = docstring,
+                                parameters = parameters,
+                                returnType = enrichedReturnType,
+                                startLine = i,
+                                endLine = endLine
+                            )
                         )
-                    )
-                    
-                    classStack.removeAll { it.second >= currentIndent }
-                    
-                    if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
-                        classStack.last().first.add(node)
-                    } else {
-                        rootNode.add(node)
-                        classStack.clear()
+                        
+                        classStack.removeAll { it.second >= currentIndent }
+                        
+                        if (classStack.isNotEmpty() && currentIndent > classStack.last().second) {
+                            classStack.last().first.add(node)
+                        } else {
+                            rootNode.add(node)
+                            classStack.clear()
+                        }
+                        
+                        // Переходим к следующей строке после определения функции
+                        i = functionEndLine + 1
+                        continue
                     }
                 }
                 
                 i++
             }
             
+            // Если есть текст поиска, удаляем классы без подходящих методов
+            if (searchText.isNotBlank()) {
+                removeEmptyClasses(rootNode)
+            }
+            
             if (rootNode.childCount == 0) {
-                rootNode.add(DefaultMutableTreeNode(StructureNode("Нет элементов", StructureNodeType.UNKNOWN)))
+                val message = if (searchText.isNotBlank()) {
+                    "Совпадений не найдено"
+                } else {
+                    "Нет элементов"
+                }
+                rootNode.add(DefaultMutableTreeNode(StructureNode(message, StructureNodeType.UNKNOWN)))
             }
             
             structureTree.model = DefaultTreeModel(rootNode)
@@ -299,6 +345,357 @@ class FileStructurePanel(private val project: Project) {
         } catch (e: Exception) {
             showEmptyState("Ошибка при парсинге файла: ${e.message}")
         }
+    }
+    
+    private fun functionMatchesSearch(
+        functionName: String,
+        signature: String,
+        docstring: String?,
+        parameters: List<ParameterInfo>,
+        returnType: String?,
+        lines: List<String>,
+        startLine: Int,
+        endLine: Int?
+    ): Boolean {
+        if (searchText.isBlank()) {
+            return true
+        }
+        
+        val searchLower = searchText.lowercase()
+        
+        // Проверяем имя функции
+        if (functionName.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем сигнатуру
+        if (signature.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем docstring
+        if (docstring != null && docstring.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем параметры
+        if (parameters.any { param ->
+            param.name.lowercase().contains(searchLower) ||
+            (param.type?.lowercase()?.contains(searchLower) == true) ||
+            (param.description?.lowercase()?.contains(searchLower) == true)
+        }) {
+            return true
+        }
+        
+        // Проверяем тип возврата
+        if (returnType != null && returnType.lowercase().contains(searchLower)) {
+            return true
+        }
+        
+        // Проверяем код функции
+        val actualEndLine = endLine ?: (lines.size - 1)
+        if (startLine < lines.size && actualEndLine < lines.size) {
+            val functionCode = lines.subList(startLine, minOf(actualEndLine + 1, lines.size))
+                .joinToString("\n")
+            if (functionCode.lowercase().contains(searchLower)) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    private fun removeEmptyClasses(node: DefaultMutableTreeNode) {
+        val nodesToRemove = mutableListOf<DefaultMutableTreeNode>()
+        
+        for (i in 0 until node.childCount) {
+            val child = node.getChildAt(i) as? DefaultMutableTreeNode ?: continue
+            val userObject = child.userObject
+            
+            if (userObject is StructureNode && userObject.type == StructureNodeType.CLASS) {
+                // Рекурсивно удаляем пустые классы внутри
+                removeEmptyClasses(child)
+                
+                // Если класс не имеет детей (методов), удаляем его
+                if (child.childCount == 0) {
+                    nodesToRemove.add(child)
+                }
+            }
+        }
+        
+        // Удаляем пустые классы
+        nodesToRemove.forEach { node.remove(it) }
+    }
+    
+    /**
+     * Извлекает полное определение функции, включая многострочные параметры.
+     * Возвращает тройку: (paramsStr, returnType, endLine) или null, если определение некорректно.
+     */
+    private fun extractMultilineFunctionDefinition(lines: List<String>, startLine: Int): Triple<String, String?, Int>? {
+        if (startLine >= lines.size) return null
+        
+        val firstLine = lines[startLine]
+        val trimmed = firstLine.trim()
+        
+        // Проверяем, что это начало определения функции
+        if (!trimmed.startsWith("def ")) return null
+        
+        // Ищем открывающую скобку
+        val openParenIndex = trimmed.indexOf('(')
+        if (openParenIndex < 0) return null
+        
+        // Собираем строки до закрывающей скобки
+        val functionLines = mutableListOf<String>()
+        var currentLine = startLine
+        var parenDepth = 0
+        var foundOpenParen = false
+        var foundCloseParen = false
+        
+        while (currentLine < lines.size) {
+            val line = lines[currentLine]
+            val lineTrimmed = line.trim()
+            
+            // Пропускаем комментарии
+            if (lineTrimmed.startsWith("#")) {
+                currentLine++
+                continue
+            }
+            
+            // Подсчитываем скобки, учитывая строки
+            var inString = false
+            var stringChar: Char? = null
+            var escaped = false
+            
+            for (char in line) {
+                if (escaped) {
+                    escaped = false
+                    continue
+                }
+                
+                when (char) {
+                    '\\' -> escaped = true
+                    '"', '\'' -> {
+                        if (!inString) {
+                            inString = true
+                            stringChar = char
+                        } else if (char == stringChar) {
+                            inString = false
+                            stringChar = null
+                        }
+                    }
+                    '(' -> {
+                        if (!inString) {
+                            parenDepth++
+                            foundOpenParen = true
+                        }
+                    }
+                    ')' -> {
+                        if (!inString) {
+                            parenDepth--
+                            if (parenDepth == 0 && foundOpenParen) {
+                                foundCloseParen = true
+                            }
+                        }
+                    }
+                }
+            }
+            
+            functionLines.add(line)
+            
+            // Если нашли закрывающую скобку на верхнем уровне, ищем аннотацию возврата и двоеточие
+            if (foundCloseParen) {
+                // Ищем -> type : на текущей или следующих строках
+                var searchLine = currentLine
+                var returnType: String? = null
+                var colonFound = false
+                
+                // Проверяем текущую строку после закрывающей скобки
+                val afterCloseParen = line.substringAfter(')', "")
+                val afterCloseTrimmed = afterCloseParen.trim()
+                
+                // Ищем -> type : или -> type:
+                val returnTypeMatch = Regex("->\\s*([^:]+?)\\s*:").find(afterCloseTrimmed)
+                if (returnTypeMatch != null) {
+                    returnType = returnTypeMatch.groupValues[1].trim().takeIf { it.isNotEmpty() }
+                    colonFound = true
+                } else {
+                    // Проверяем, есть ли просто двоеточие без аннотации возврата
+                    if (afterCloseTrimmed.startsWith(':')) {
+                        colonFound = true
+                    }
+                }
+                
+                // Если двоеточие не найдено, ищем на следующих строках
+                if (!colonFound) {
+                    searchLine++
+                    while (searchLine < lines.size && !colonFound) {
+                        val nextLine = lines[searchLine].trim()
+                        if (nextLine.isEmpty() || nextLine.startsWith("#")) {
+                            searchLine++
+                            continue
+                        }
+                        
+                        // Ищем -> type : или просто :
+                        val returnTypeMatch2 = Regex("->\\s*([^:]+?)\\s*:").find(nextLine)
+                        if (returnTypeMatch2 != null) {
+                            returnType = returnTypeMatch2.groupValues[1].trim().takeIf { it.isNotEmpty() }
+                            colonFound = true
+                            functionLines.add(lines[searchLine])
+                            currentLine = searchLine
+                        } else if (nextLine.startsWith(':')) {
+                            colonFound = true
+                            functionLines.add(lines[searchLine])
+                            currentLine = searchLine
+                        }
+                        
+                        if (!colonFound) {
+                            searchLine++
+                        }
+                    }
+                }
+                
+                if (colonFound) {
+                    // Извлекаем параметры из собранных строк
+                    val paramsStr = extractParametersFromFunctionLines(functionLines)
+                    return Triple(paramsStr, returnType, currentLine)
+                } else {
+                    // Если не нашли двоеточие, определение некорректно
+                    return null
+                }
+            }
+            
+            currentLine++
+            
+            // Защита от бесконечного цикла
+            if (currentLine - startLine > 100) {
+                return null
+            }
+        }
+        
+        // Если не нашли закрывающую скобку, определение некорректно
+        return null
+    }
+    
+    /**
+     * Извлекает строку параметров из многострочного определения функции.
+     */
+    private fun extractParametersFromFunctionLines(functionLines: List<String>): String {
+        if (functionLines.isEmpty()) return ""
+        
+        val paramsBuilder = StringBuilder()
+        var foundOpenParen = false
+        var parenDepth = 0
+        var inString = false
+        var stringChar: Char? = null
+        var escaped = false
+        
+        for (line in functionLines) {
+            val trimmed = line.trim()
+            
+            // Пропускаем строку с def, но начинаем отслеживать скобки
+            if (trimmed.startsWith("def ")) {
+                val openParenIndex = trimmed.indexOf('(')
+                if (openParenIndex >= 0) {
+                    foundOpenParen = true
+                    val afterDef = trimmed.substring(openParenIndex + 1)
+                    // Уже внутри скобки def(...); иначе первая ')' даёт parenDepth < 0 и параметры не извлекаются
+                    parenDepth = 1
+                    
+                    // Подсчитываем скобки в первой строке
+                    for (char in afterDef) {
+                        if (escaped) {
+                            escaped = false
+                            paramsBuilder.append(char)
+                            continue
+                        }
+                        
+                        when (char) {
+                            '\\' -> escaped = true
+                            '"', '\'' -> {
+                                if (!inString) {
+                                    inString = true
+                                    stringChar = char
+                                } else if (char == stringChar) {
+                                    inString = false
+                                    stringChar = null
+                                }
+                                paramsBuilder.append(char)
+                            }
+                            '(' -> {
+                                if (!inString) parenDepth++
+                                paramsBuilder.append(char)
+                            }
+                            ')' -> {
+                                if (!inString) {
+                                    parenDepth--
+                                    if (parenDepth == 0) {
+                                        // Нашли закрывающую скобку верхнего уровня
+                                        break
+                                    }
+                                }
+                                paramsBuilder.append(char)
+                            }
+                            else -> paramsBuilder.append(char)
+                        }
+                    }
+                    
+                    if (parenDepth > 0) {
+                        paramsBuilder.append(" ")
+                    }
+                }
+                continue
+            }
+            
+            if (foundOpenParen && parenDepth > 0) {
+                // Добавляем строку с параметрами, отслеживая скобки
+                for (char in trimmed) {
+                    if (escaped) {
+                        escaped = false
+                        paramsBuilder.append(char)
+                        continue
+                    }
+                    
+                    when (char) {
+                        '\\' -> escaped = true
+                        '"', '\'' -> {
+                            if (!inString) {
+                                inString = true
+                                stringChar = char
+                            } else if (char == stringChar) {
+                                inString = false
+                                stringChar = null
+                            }
+                            paramsBuilder.append(char)
+                        }
+                        '(' -> {
+                            if (!inString) parenDepth++
+                            paramsBuilder.append(char)
+                        }
+                        ')' -> {
+                            if (!inString) {
+                                parenDepth--
+                                if (parenDepth == 0) {
+                                    // Нашли закрывающую скобку верхнего уровня
+                                    break
+                                }
+                            }
+                            paramsBuilder.append(char)
+                        }
+                        else -> paramsBuilder.append(char)
+                    }
+                }
+                
+                if (parenDepth > 0) {
+                    paramsBuilder.append(" ")
+                } else {
+                    // Закрывающая скобка найдена, останавливаемся
+                    break
+                }
+            }
+        }
+        
+        // Содержимое списка параметров (без внешних скобок def); типы вроде Callable[(...)] не режем по первой '('
+        return paramsBuilder.toString().trim()
     }
     
     private fun parseParameters(paramsStr: String): List<ParameterInfo> {
@@ -446,6 +843,21 @@ class FileStructurePanel(private val project: Project) {
             hasFocus: Boolean
         ): java.awt.Component {
             super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
+            
+            // Убираем серый фон для невыбранных элементов
+            // Для выбранных элементов оставляем стандартное синее выделение
+            if (!selected) {
+                // Для невыбранных элементов убираем фон полностью (прозрачный/черный)
+                background = null
+                isOpaque = false
+                // Используем правильный цвет текста из дерева
+                foreground = tree?.foreground
+            } else {
+                // Для выбранных элементов оставляем стандартное синее выделение
+                // Родительский метод уже установил правильный фон для выделения
+                isOpaque = true
+                // Цвет текста для выбранных элементов уже установлен родительским методом
+            }
             
             val node = (value as? DefaultMutableTreeNode)?.userObject
             if (node is StructureNode) {
@@ -695,18 +1107,29 @@ class FileStructurePanel(private val project: Project) {
         val sourceFile = currentFile ?: return
         val functionName = functionNode.name
         
+        // Проверяем настройку использования префикса модуля
+        val settings = FolderScannerSettings.getInstance()
+        val useModulePrefix = settings.state.useModulePrefix
+        
+        // Получаем имя модуля (имя файла без расширения)
+        val moduleName = if (useModulePrefix) {
+            sourceFile.nameWithoutExtension
+        } else {
+            null
+        }
+        
         // Формируем путь для импорта
-        val importPath = calculateImportPath(sourceFile, targetFile)
+        val importPath = calculateImportPath(sourceFile, targetFile, useModulePrefix, moduleName)
         
         // Формируем вызов функции
-        val functionCall = buildFunctionCall(functionNode)
+        val functionCall = buildFunctionCall(functionNode, moduleName)
         
         WriteCommandAction.runWriteCommandAction(project) {
             val document = editor.document
             val originalCaretOffset = editor.caretModel.offset
             
             // Сначала добавляем импорт в верх файла
-            val importInsertedInfo = addImportIfNeededInternal(editor, importPath, functionName)
+            val importInsertedInfo = addImportIfNeededInternal(editor, importPath, functionName, useModulePrefix, moduleName)
             
             // Корректируем позицию курсора, если импорт был вставлен перед курсором
             // importInsertedInfo содержит (offset, length) - где был вставлен импорт и его длина
@@ -717,23 +1140,23 @@ class FileStructurePanel(private val project: Project) {
                 originalCaretOffset
             }
             
-            // Вставляем вызов функции в место курсора
-            val documentText = document.text
-            val textToInsert = if (adjustedCaretOffset == documentText.length || 
-                                   (adjustedCaretOffset < documentText.length && documentText[adjustedCaretOffset] == '\n')) {
-                "$functionCall\n"
-            } else {
-                "\n$functionCall\n"
-            }
+            // Находим конец строки, где находится курсор
+            val currentLineNumber = document.getLineNumber(adjustedCaretOffset)
+            val lineEndOffset = document.getLineEndOffset(currentLineNumber)
             
-            document.insertString(adjustedCaretOffset, textToInsert)
+            // Перемещаем курсор в конец строки
+            editor.caretModel.moveToOffset(lineEndOffset)
+            
+            // Вставляем перевод строки и вызов функции
+            val textToInsert = "\n$functionCall\n"
+            document.insertString(lineEndOffset, textToInsert)
             
             // Перемещаем курсор после вставленного кода (на новой строке)
-            editor.caretModel.moveToOffset(adjustedCaretOffset + textToInsert.length)
+            editor.caretModel.moveToOffset(lineEndOffset + textToInsert.length)
         }
     }
     
-    private fun calculateImportPath(sourceFile: VirtualFile, targetFile: VirtualFile): String {
+    private fun calculateImportPath(sourceFile: VirtualFile, targetFile: VirtualFile, useModulePrefix: Boolean, moduleName: String?): String {
         val projectBaseDir = project.baseDir ?: return ""
         
         // Получаем относительные пути от корня проекта
@@ -751,6 +1174,18 @@ class FileStructurePanel(private val project: Project) {
             return ""
         }
         
+        // Если включен режим префикса модуля, возвращаем путь к директории модуля
+        if (useModulePrefix && moduleName != null) {
+            // Получаем директорию модуля (путь без имени файла)
+            val moduleDir = sourceModule.substringBeforeLast('.', "")
+            // Если модуль в корне проекта, возвращаем пустую строку (будет импорт без from)
+            return if (moduleDir.isEmpty()) {
+                "" // Модуль в корне, импорт будет просто "import moduleName"
+            } else {
+                moduleDir // Возвращаем путь к директории для "from moduleDir import moduleName"
+            }
+        }
+        
         // Получаем директории файлов
         val sourceDir = sourceModule.substringBeforeLast('.', "")
         val targetDir = targetModule.substringBeforeLast('.', "")
@@ -765,23 +1200,32 @@ class FileStructurePanel(private val project: Project) {
         }
     }
     
-    private fun buildFunctionCall(functionNode: StructureNode): String {
+    private fun buildFunctionCall(functionNode: StructureNode, moduleName: String?): String {
         val functionName = functionNode.name
         val parameters = functionNode.parameters
         
-        // Формируем список аргументов
+        // Формируем список аргументов, исключая параметр self
         val args = if (parameters.isNotEmpty()) {
-            parameters.joinToString(", ") { param ->
-                "${param.name}=YOUR_ARG"
-            }
+            parameters
+                .filter { it.name != "self" }  // Игнорируем параметр self
+                .joinToString(", ") { param ->
+                    "${param.name}=YOU_ARG"
+                }
         } else {
             ""
         }
         
-        val functionCall = if (args.isNotEmpty()) {
-            "$functionName($args)"
+        // Если указан префикс модуля, добавляем его
+        val fullFunctionName = if (moduleName != null) {
+            "$moduleName.$functionName"
         } else {
-            "$functionName()"
+            functionName
+        }
+        
+        val functionCall = if (args.isNotEmpty()) {
+            "$fullFunctionName($args)"
+        } else {
+            "$fullFunctionName()"
         }
         
         // Анализируем return statements в коде функции
@@ -1282,7 +1726,13 @@ class FileStructurePanel(private val project: Project) {
         return count
     }
     
-    private fun addImportIfNeededInternal(editor: com.intellij.openapi.editor.Editor, importPath: String, functionName: String): Pair<Int, Int>? {
+    private fun addImportIfNeededInternal(
+        editor: com.intellij.openapi.editor.Editor, 
+        importPath: String, 
+        functionName: String,
+        useModulePrefix: Boolean,
+        moduleName: String?
+    ): Pair<Int, Int>? {
         if (importPath.isEmpty()) {
             return null // Не нужно добавлять импорт
         }
@@ -1290,83 +1740,184 @@ class FileStructurePanel(private val project: Project) {
         val document = editor.document
         val text = document.text
         
-        // Проверяем, есть ли уже такой импорт
-        val importStatement = "from $importPath import $functionName"
-        val fullImportRegex = Regex("from\\s+$importPath\\s+import\\s+$functionName(?:\\s*,\\s*|\\s*$)")
-        if (fullImportRegex.find(text) != null) {
-            return null // Импорт уже есть
-        }
-        
-        // Проверяем, есть ли уже импорт из этого модуля
-        val existingImportRegex = Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)")
-        val existingImportMatch = existingImportRegex.find(text)
-        
-        if (existingImportMatch != null) {
-            // Добавляем функцию к существующему импорту
-            val existingImport = existingImportMatch.value
-            val importsList = existingImportMatch.groupValues[1].trim()
-            
-            // Проверяем, не добавлена ли уже функция
-            val functionNameRegex = Regex("\\b$functionName\\b")
-            if (functionNameRegex.find(importsList) != null) {
-                return null // Функция уже в импорте
+        // Если включен режим префикса модуля, импортируем модуль, а не функцию
+        if (useModulePrefix && moduleName != null) {
+            // Формируем импорт модуля
+            val importStatement = if (importPath.isEmpty()) {
+                // Модуль в корне проекта
+                "import $moduleName"
+            } else {
+                // Модуль в поддиректории
+                "from $importPath import $moduleName"
+            }
+            // Проверяем, есть ли уже импорт модуля
+            val fullImportRegex = if (importPath.isEmpty()) {
+                Regex("^import\\s+$moduleName(?:\\s*,\\s*|\\s*$)", RegexOption.MULTILINE)
+            } else {
+                Regex("from\\s+$importPath\\s+import\\s+$moduleName(?:\\s*,\\s*|\\s*$)", RegexOption.MULTILINE)
+            }
+            if (fullImportRegex.find(text) != null) {
+                return null // Импорт уже есть
             }
             
-            // Формируем новый импорт
-            val newImportsList = if (importsList.contains(",")) {
-                "$importsList, $functionName"
+            // Проверяем, есть ли уже импорт из этого модуля/директории
+            val existingImportRegex = if (importPath.isEmpty()) {
+                Regex("^import\\s+([^\\n]+)", RegexOption.MULTILINE)
             } else {
-                "$importsList, $functionName"
+                Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)", RegexOption.MULTILINE)
+            }
+            val existingImportMatch = existingImportRegex.find(text)
+            
+            if (existingImportMatch != null) {
+                // Добавляем модуль к существующему импорту
+                val existingImport = existingImportMatch.value
+                val importsList = existingImportMatch.groupValues[1].trim()
+                
+                // Проверяем, не добавлен ли уже модуль
+                val moduleNameRegex = Regex("\\b$moduleName\\b")
+                if (moduleNameRegex.find(importsList) != null) {
+                    return null // Модуль уже в импорте
+                }
+                
+                // Формируем новый импорт
+                val newImportsList = if (importsList.contains(",")) {
+                    "$importsList, $moduleName"
+                } else {
+                    "$importsList, $moduleName"
+                }
+                
+                val newImport = if (importPath.isEmpty()) {
+                    "import $newImportsList"
+                } else {
+                    "from $importPath import $newImportsList"
+                }
+                val startOffset = existingImportMatch.range.first
+                val endOffset = existingImportMatch.range.last + 1
+                
+                document.replaceString(startOffset, endOffset, newImport)
+                // При замене существующего импорта позиция курсора не меняется
+                return null
             }
             
-            val newImport = "from $importPath import $newImportsList"
-            val startOffset = existingImportMatch.range.first
-            val endOffset = existingImportMatch.range.last + 1
+            // Находим место для вставки импорта (после всех существующих импортов)
+            val importSectionEnd = findImportSectionEnd(text)
             
-            document.replaceString(startOffset, endOffset, newImport)
-            // При замене существующего импорта позиция курсора не меняется
-            return null
-        }
-        
-        // Находим место для вставки импорта (после всех существующих импортов)
-        val importSectionEnd = findImportSectionEnd(text)
-        
-        // Если файл пустой, просто вставляем импорт
-        if (text.isEmpty()) {
-            val insertedText = importStatement + "\n"
-            document.insertString(0, insertedText)
-            return Pair(0, insertedText.length) // offset, length
-        }
-        
-        // Вставляем новый импорт
-        val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
-            "\n$importStatement"
-        } else {
-            importStatement
-        }
-        
-        // Проверяем, нужно ли добавлять перевод строки в конце
-        val needsNewline = if (importSectionEnd < text.length) {
-            text[importSectionEnd] != '\n'
-        } else {
-            // Если мы в конце файла, проверяем последний символ
-            text.isNotEmpty() && text[text.length - 1] != '\n'
-        }
-        
-        val finalInsertText = if (needsNewline) {
-            insertText + "\n"
-        } else {
-            if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
-                insertText
+            // Если файл пустой, просто вставляем импорт
+            if (text.isEmpty()) {
+                val insertedText = importStatement + "\n"
+                document.insertString(0, insertedText)
+                return Pair(0, insertedText.length) // offset, length
+            }
+            
+            // Вставляем новый импорт
+            val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
+                "\n$importStatement"
             } else {
+                importStatement
+            }
+            
+            // Проверяем, нужно ли добавлять перевод строки в конце
+            val needsNewline = if (importSectionEnd < text.length) {
+                text[importSectionEnd] != '\n'
+            } else {
+                // Если мы в конце файла, проверяем последний символ
+                text.isNotEmpty() && text[text.length - 1] != '\n'
+            }
+            
+            val finalInsertText = if (needsNewline) {
                 insertText + "\n"
+            } else {
+                if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
+                    insertText
+                } else {
+                    insertText + "\n"
+                }
             }
+            
+            document.insertString(importSectionEnd, finalInsertText)
+            
+            // Возвращаем (offset, length) - где был вставлен импорт и его длина
+            return Pair(importSectionEnd, finalInsertText.length)
+        } else {
+            // Старая логика: импорт функции
+            // Проверяем, есть ли уже такой импорт
+            val importStatement = "from $importPath import $functionName"
+            val fullImportRegex = Regex("from\\s+$importPath\\s+import\\s+$functionName(?:\\s*,\\s*|\\s*$)")
+            if (fullImportRegex.find(text) != null) {
+                return null // Импорт уже есть
+            }
+            
+            // Проверяем, есть ли уже импорт из этого модуля
+            val existingImportRegex = Regex("from\\s+$importPath\\s+import\\s+([^\\n]+)")
+            val existingImportMatch = existingImportRegex.find(text)
+            
+            if (existingImportMatch != null) {
+                // Добавляем функцию к существующему импорту
+                val existingImport = existingImportMatch.value
+                val importsList = existingImportMatch.groupValues[1].trim()
+                
+                // Проверяем, не добавлена ли уже функция
+                val functionNameRegex = Regex("\\b$functionName\\b")
+                if (functionNameRegex.find(importsList) != null) {
+                    return null // Функция уже в импорте
+                }
+                
+                // Формируем новый импорт
+                val newImportsList = if (importsList.contains(",")) {
+                    "$importsList, $functionName"
+                } else {
+                    "$importsList, $functionName"
+                }
+                
+                val newImport = "from $importPath import $newImportsList"
+                val startOffset = existingImportMatch.range.first
+                val endOffset = existingImportMatch.range.last + 1
+                
+                document.replaceString(startOffset, endOffset, newImport)
+                // При замене существующего импорта позиция курсора не меняется
+                return null
+            }
+            
+            // Находим место для вставки импорта (после всех существующих импортов)
+            val importSectionEnd = findImportSectionEnd(text)
+            
+            // Если файл пустой, просто вставляем импорт
+            if (text.isEmpty()) {
+                val insertedText = importStatement + "\n"
+                document.insertString(0, insertedText)
+                return Pair(0, insertedText.length) // offset, length
+            }
+            
+            // Вставляем новый импорт
+            val insertText = if (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] != '\n') {
+                "\n$importStatement"
+            } else {
+                importStatement
+            }
+            
+            // Проверяем, нужно ли добавлять перевод строки в конце
+            val needsNewline = if (importSectionEnd < text.length) {
+                text[importSectionEnd] != '\n'
+            } else {
+                // Если мы в конце файла, проверяем последний символ
+                text.isNotEmpty() && text[text.length - 1] != '\n'
+            }
+            
+            val finalInsertText = if (needsNewline) {
+                insertText + "\n"
+            } else {
+                if (importSectionEnd == 0 || (importSectionEnd > 0 && importSectionEnd <= text.length && text[importSectionEnd - 1] == '\n')) {
+                    insertText
+                } else {
+                    insertText + "\n"
+                }
+            }
+            
+            document.insertString(importSectionEnd, finalInsertText)
+            
+            // Возвращаем (offset, length) - где был вставлен импорт и его длина
+            return Pair(importSectionEnd, finalInsertText.length)
         }
-        
-        document.insertString(importSectionEnd, finalInsertText)
-        
-        // Возвращаем (offset, length) - где был вставлен импорт и его длина
-        return Pair(importSectionEnd, finalInsertText.length)
     }
     
     private fun findImportSectionEnd(text: String): Int {

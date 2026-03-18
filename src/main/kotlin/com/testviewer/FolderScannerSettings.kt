@@ -10,7 +10,8 @@ import com.intellij.openapi.components.*
 @Service
 class FolderScannerSettings : PersistentStateComponent<FolderScannerSettings.State> {
     data class State(
-        var folderPaths: MutableList<String> = mutableListOf()
+        var folderPaths: MutableList<String> = mutableListOf(),
+        var useModulePrefix: Boolean = false
     )
 
     private var state = State()
